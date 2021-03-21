@@ -30,7 +30,7 @@ struct Material
 
 Vec3f reflect(const Vec3f& I, const Vec3f& N)
 {
-	return I - N* 2.f * (I * N);
+	return I - N * 2.f * (I * N);
 }
 
 struct Sphere
@@ -40,7 +40,7 @@ struct Sphere
 	Material material;
 
 	Sphere(const Vec3f& c, const float& r) : center(c), radius(r) {}
-	Sphere(const Vec3f& c, const float& r, const Material& m) : center(c), radius(r),material(m) {}
+	Sphere(const Vec3f& c, const float& r, const Material& m) : center(c), radius(r), material(m) {}
 
 	bool ray_intersect(const Vec3f& orig, const Vec3f& dir, float& t0) const
 	{
@@ -52,7 +52,7 @@ struct Sphere
 		float thc = sqrtf(radius * radius - d2);
 		t0 = tca - thc;
 		float t1 = tca + thc;
-		
+
 		if (t0 < 0) t0 = t1;
 		if (t0 < 0) return false;
 		return true;
@@ -61,17 +61,17 @@ struct Sphere
 
 
 //scene hitter
-bool scene_intersect(const Vec3f& orig, const Vec3f& dir, const std::vector<Sphere>& spheres, Vec3f& hit,
-	Vec3f& N, Material& material)
+bool scene_intersect(const Vec3f & orig, const Vec3f & dir, const std::vector<Sphere> & spheres, Vec3f & hit,
+	Vec3f & N, Material & material)
 {
 	float sphere_dist = std::numeric_limits<float>::max();
-	
+
 	//for all the explicit geometries in the scene
 	for (size_t i = 0; i < spheres.size(); i++)
 	{
 		float dist_i;
 		//if intersects then get the info
-		if ( spheres[i].ray_intersect(orig, dir, dist_i) && (dist_i < sphere_dist))
+		if (spheres[i].ray_intersect(orig, dir, dist_i) && (dist_i < sphere_dist))
 		{
 			sphere_dist = dist_i;
 			hit = orig + dir * dist_i;
@@ -85,7 +85,7 @@ bool scene_intersect(const Vec3f& orig, const Vec3f& dir, const std::vector<Sphe
 }
 
 
-Vec3f cast_ray(const Vec3f& orig, const Vec3f& dir, const std::vector<Sphere> &spheres , const std::vector<Light> &lights)
+Vec3f cast_ray(const Vec3f & orig, const Vec3f & dir, const std::vector<Sphere> & spheres, const std::vector<Light> & lights)
 {
 	Vec3f point, N;
 	Material material;
@@ -100,6 +100,17 @@ Vec3f cast_ray(const Vec3f& orig, const Vec3f& dir, const std::vector<Sphere> &s
 	for (size_t i = 0; i < lights.size(); i++)
 	{
 		Vec3f light_dir = (lights[i].position - point).normalize();
+		float light_distance = (lights[i].position - point).norm();
+
+		Vec3f shadow_orig = light_dir * N < 0 ? point - N * 1e-3 : point + N * 1e-3;
+		Vec3f shadow_pt, shadow_N;
+		Material tmpmaterial;
+		if (scene_intersect(shadow_orig, light_dir, spheres, shadow_pt, shadow_N, tmpmaterial) 
+			&& ((shadow_pt - shadow_orig).norm() < light_distance))
+		{
+			continue;
+		}
+
 		//accumulate diffuse light from all positions ( N.L)
 		diffuse_light_intensity += lights[i].intensity * std::max(0.f, light_dir * N);
 		specular_light_intensity += powf(std::max(0.f, -reflect(-light_dir, N) * dir), material.specular_exponent) * lights[i].intensity;
@@ -134,7 +145,7 @@ void render( const std::vector<Sphere> &spheres , const std::vector<Light>& ligh
 
 	std::ofstream ofs; // save the framebuffer to file
 
-	ofs.open("out4.ppm", std::ios::binary);
+	ofs.open("out5.ppm", std::ios::binary);
 
 	ofs << "P6\n" << width << " " << height << "\n255\n";
 
