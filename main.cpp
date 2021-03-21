@@ -6,9 +6,30 @@
 #include "geometry.h"
 #include <algorithm>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
 
 #define M_PI 3.14159265
 
+
+const int width  = 1024;
+const int height = 768;
+
+//image
+struct Image
+{
+	unsigned char* data;
+	int width;
+	int height;
+	int channels_per_pixel;
+};
+
+Image env_image;
+std::vector<Vec3f> env_map;
 
 struct Light
 {
@@ -90,7 +111,7 @@ bool scene_intersect(const Vec3f & orig, const Vec3f & dir, const std::vector<Sp
 {
 	float sphere_dist = std::numeric_limits<float>::max();
 
-	//for all the explicit geometries in the scene
+	//for all the explicit spheres in the scene
 	for (size_t i = 0; i < spheres.size(); i++)
 	{
 		float dist_i;
@@ -104,13 +125,31 @@ bool scene_intersect(const Vec3f & orig, const Vec3f & dir, const std::vector<Sp
 		}
 	}
 
-	//we have a sphere which is hit and within the distance of 1000 far
-	return sphere_dist < 1000;
+	//add a checkerboard to our scene
+	float checkerboard_dist = std::numeric_limits<float>::max();
+	if (fabs(dir.y) > 1e-3)
+	{
+		float d = -(orig.y + 4) / dir.y;
+		Vec3f pt = orig + dir * d;
+		if (d > 0 && fabs(pt.x) < 10 && pt.z < -10 && pt.z > -30 && d < sphere_dist)
+		{
+			checkerboard_dist = d;
+			hit = pt;
+			N = Vec3f(0, 1, 0);
+			material.diffuse_color = (int(.5 * hit.x + 1000) + int(0.5 * hit.z)) & 1 ? Vec3f(.3,.3,.3) : Vec3f(.3, .2, .1);
+			
+
+		}
+	}
+	return std::min(sphere_dist, checkerboard_dist) < 1000;
 }
 
 
 Vec3f cast_ray(const Vec3f& orig, const Vec3f& dir, const std::vector<Sphere>& spheres, const std::vector<Light>& lights, size_t depth = 0)
 {
+	 Vec3f Xunitvec(1.0, 0.0, 0.0);
+	 Vec3f Yunitvec(0.0, -1.0, 0.0);
+
 	Vec3f point, N;
 	Material material;
 
@@ -118,7 +157,28 @@ Vec3f cast_ray(const Vec3f& orig, const Vec3f& dir, const std::vector<Sphere>& s
 	
 	if (depth > 4 || !scene_intersect(orig,dir,spheres,point,N,material ))
 	{
-		return Vec3f(0.2, 0.7, 0.8);
+		Vec3f reflect_vector = reflect(dir, N).normalize();
+		Vec2f index;
+		index.y = (reflect_vector * Yunitvec);
+		reflect_vector.y = 0.0f;
+		index.x = (reflect_vector * Xunitvec);
+
+		if (reflect_vector.z >= 0.0)
+		{
+			index.x = (index.x + 1.0) * 0.5;
+			index.y = (index.y + 1.0) * 0.5;
+
+		}
+		else
+		{
+			index.y = (index.y + 1.0) * 0.5;
+			index.x = (-index.x) * 0.5 + 1.0;
+		}
+		//background color
+		int i = index.x * env_image.width;
+		int j = index.y * env_image.height;
+
+		return env_map[i + j * env_image.width];
 	}
 
 	Vec3f reflect_dir = reflect(dir, N).normalize();
@@ -159,30 +219,23 @@ Vec3f cast_ray(const Vec3f& orig, const Vec3f& dir, const std::vector<Sphere>& s
 
 void render( const std::vector<Sphere> &spheres , const std::vector<Light>& lights)
 {
-	const int width = 1024;
-	const int height = 768;
-	const int fov = M_PI / 2;
+	
+	const int fov = M_PI / 3;
 	std::vector<Vec3f> framebuffer(width * height);
-
 
 	for (size_t j = 0; j < height; j++)
 	{
 		for (size_t i = 0; i < width; i++)
 		{
-		
-			float x = (2 * (i + 0.5) / (float)width - 1) * tan(fov / 2.) * width / (float)height;
-			float y = -(2 * (j + 0.5) / (float)height - 1) * tan(fov / 2.);
-			Vec3f dir = Vec3f(x, y, -1).normalize();
+			float dir_x = (i + 0.5) - width / 2.;
+			float dir_y = -(j + 0.5) + height / 2.;
+			float dir_z = -height / (2. * tan(fov / 2.));
 
-			framebuffer[i + j * width] = cast_ray(Vec3f(0, 0, 0), dir, spheres, lights);
+			framebuffer[i + j * width] = cast_ray(Vec3f(0, 0, 0), Vec3f(dir_x,dir_y,dir_z).normalize(), spheres, lights);
 		}
 	}
-
-	std::ofstream ofs; // save the framebuffer to file
-
-	ofs.open("out7.ppm", std::ios::binary);
-
-	ofs << "P6\n" << width << " " << height << "\n255\n";
+	
+	std::vector<unsigned char> pixmap(width * height * 3);
 
 	for (size_t i = 0; i < height * width; i++)
 	{
@@ -192,15 +245,34 @@ void render( const std::vector<Sphere> &spheres , const std::vector<Light>& ligh
 
 		for (size_t j = 0; j < 3; j++)
 		{
-			ofs << (char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][j])));
+			pixmap[i * 3 + j] = (unsigned char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][j])));
 		}
 	}
-	ofs.close();
+	
+	stbi_write_jpg("out.jpg", width, height, 3, pixmap.data(), 100);
+
 }
 
 
 int main()
 {
+	//image setup
+	env_image.data = stbi_load("envmap.jpg", &env_image.width, &env_image.height, &env_image.channels_per_pixel, 0);
+	assert(env_image.data && env_image.channels_per_pixel == 3);
+
+	env_map = std::vector<Vec3f>(env_image.width * env_image.height);
+
+	for (int j = env_image.height-1; j--;)
+	{
+		for (size_t i = 0; i < env_image.width; i++)
+		{
+			env_map[i + j * env_image.width] = Vec3f(env_image.data[(i + j * env_image.width) * 3 + 0],
+								                     env_image.data[(i + j * env_image.width) * 3 + 1],
+								                     env_image.data[(i + j * env_image.width) * 3 + 2] ) * (1/255.);
+		}
+	}
+	stbi_image_free(env_image.data);
+
 	Material ivory(     1.0,Vec4f(0.6,0.3,0.1,0.0),    Vec3f(0.4, 0.4, 0.3),50.);
 	Material glass(     1.5,Vec4f(0.0,0.5, 0.1, 0.8),  Vec3f(0.6, 0.7, 0.8), 125.);
 	Material red_rubber(1.0,Vec4f(0.9,0.1,0.0,0.0),    Vec3f(0.3, 0.1, 0.1),10.);
@@ -218,6 +290,8 @@ int main()
 	lights.push_back(Light(Vec3f( 30, 20, 20), 1.7));
 
 	render(spheres,lights);
+
+
 	return 0;
 }
 
